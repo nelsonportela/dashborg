@@ -1,0 +1,15 @@
+services:
+  dashborg:
+    build: .
+    image: dashborg:latest
+    container_name: dashborg
+    ports:
+      - "3157:8000"
+    volumes:
+      - ./source:/source:ro
+      - ./destination:/destination
+      - ~/.ssh:/root/.ssh:ro
+      - ./config:/etc/borgmatic
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
