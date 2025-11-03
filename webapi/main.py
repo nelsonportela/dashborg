@@ -314,6 +314,107 @@ async def create_backup(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.post("/api/prune")
+async def prune_archives(request: Request):
+    """Prune old archives according to retention policy."""
+    try:
+        data = await request.json()
+        config_file = data.get("config", "config.yaml")
+        dry_run = data.get("dry_run", False)
+        
+        # Generate job ID
+        job_id = str(uuid.uuid4())
+        
+        # Build command
+        cmd = [
+            "borgmatic", "prune",
+            "--config", f"/etc/borgmatic/{config_file}",
+            "--verbosity", "1",
+            "--stats"
+        ]
+        
+        if dry_run:
+            cmd.append("--dry-run")
+        
+        # Initialize job
+        jobs[job_id] = {
+            "id": job_id,
+            "type": "prune" if not dry_run else "prune-dry-run",
+            "command": " ".join(cmd),
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "config": config_file,
+            "stats": None,
+            "output_lines": [],
+            "progress_info": {
+                "current_file": None,
+                "files_processed": 0,
+                "last_update": None
+            }
+        }
+        
+        # Run in background
+        thread = threading.Thread(target=run_job_in_background, args=(job_id, cmd, "prune"))
+        thread.daemon = True
+        thread.start()
+        
+        return JSONResponse({"job_id": job_id, "message": f"Prune job started ({'dry-run' if dry_run else 'live'})"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/check")
+async def check_repository(request: Request):
+    """Check repository consistency and integrity."""
+    try:
+        data = await request.json()
+        config_file = data.get("config", "config.yaml")
+        check_type = data.get("check_type", "repository")  # repository, archives, data, extract
+        
+        # Generate job ID
+        job_id = str(uuid.uuid4())
+        
+        # Build command
+        cmd = [
+            "borgmatic", "check",
+            "--config", f"/etc/borgmatic/{config_file}",
+            "--verbosity", "1"
+        ]
+        
+        # Add check options based on type
+        if check_type == "repository":
+            cmd.append("--repository-only")
+        elif check_type == "archives":
+            cmd.append("--archives-only")
+        elif check_type == "data":
+            cmd.extend(["--verify-data"])
+        # "extract" uses default check behavior
+        
+        # Initialize job
+        jobs[job_id] = {
+            "id": job_id,
+            "type": f"check-{check_type}",
+            "command": " ".join(cmd),
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "config": config_file,
+            "stats": None,
+            "output_lines": [],
+            "progress_info": {
+                "current_file": None,
+                "files_processed": 0,
+                "last_update": None
+            }
+        }
+        
+        # Run in background
+        thread = threading.Thread(target=run_job_in_background, args=(job_id, cmd, f"check-{check_type}"))
+        thread.daemon = True
+        thread.start()
+        
+        return JSONResponse({"job_id": job_id, "message": f"Check job started ({check_type})"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.get("/api/jobs")
 def list_jobs(db: Session = Depends(get_db), limit: int = 50, offset: int = 0):
     """List all jobs from database and merge with in-memory active jobs."""

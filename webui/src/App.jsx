@@ -32,6 +32,14 @@ export default function App() {
   const [appendOnly, setAppendOnly] = useState(false);
   const [storageQuota, setStorageQuota] = useState("");
   const [makeParentDirs, setMakeParentDirs] = useState(false);
+  
+  // Prune state
+  const [pruneLoading, setPruneLoading] = useState(false);
+  const [pruneDryRun, setPruneDryRun] = useState(true);
+  
+  // Check state
+  const [checkLoading, setCheckLoading] = useState(false);
+  const [checkType, setCheckType] = useState("repository");
 
   // Jobs page state
   const [jobs, setJobs] = useState([]);
@@ -578,6 +586,168 @@ export default function App() {
                       <pre className="text-xs text-red-300 whitespace-pre-wrap">{repoCreateError}</pre>
                     </div>
                   )}
+                </div>
+                
+                {/* Prune Archives Section */}
+                <div className="mb-8 pb-8 border-b border-gray-700">
+                  <h3 className="text-xl font-medium text-white mb-4">Prune Archives</h3>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Remove old archives according to your retention policy. Use dry-run to preview what would be deleted.
+                  </p>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">Config File:</label>
+                      <select
+                        className="w-full p-2 rounded-lg bg-gray-700 text-white text-sm border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                        value={repoConfig}
+                        onChange={e => setRepoConfig(e.target.value)}
+                      >
+                        {configFiles.map(f => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center text-sm text-gray-300">
+                        <input
+                          type="checkbox"
+                          className="mr-2 rounded bg-gray-700 border-gray-600"
+                          checked={pruneDryRun}
+                          onChange={e => setPruneDryRun(e.target.checked)}
+                        />
+                        Dry-run (preview only, don't delete)
+                      </label>
+                    </div>
+                    
+                    <button
+                      className={`w-full py-3 px-4 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+                        pruneDryRun ? 'bg-blue-600 hover:bg-blue-500' : 'bg-orange-600 hover:bg-orange-500'
+                      }`}
+                      disabled={pruneLoading}
+                      onClick={async () => {
+                        if (!pruneDryRun && !confirm('Are you sure you want to prune archives? This will permanently delete old backups according to your retention policy.')) {
+                          return;
+                        }
+                        
+                        setPruneLoading(true);
+                        
+                        try {
+                          const res = await fetch("/api/prune", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              config: repoConfig,
+                              dry_run: pruneDryRun
+                            }),
+                          });
+                          
+                          const data = await res.json();
+                          
+                          if (res.ok) {
+                            // Navigate to jobs page to see progress
+                            setPage("jobs");
+                          } else {
+                            alert("Failed to start prune: " + (data.error || "Unknown error"));
+                          }
+                        } catch (e) {
+                          alert("Failed to start prune: " + e.message);
+                        }
+                        
+                        setPruneLoading(false);
+                      }}
+                    >
+                      {pruneLoading && <LoadingSpinner />}
+                      {pruneLoading ? "Starting..." : pruneDryRun ? "Preview Prune (Dry-Run)" : "⚠️ Prune Archives (Live)"}
+                    </button>
+                    
+                    {!pruneDryRun && (
+                      <div className="p-3 bg-orange-900/20 border border-orange-700 rounded-lg">
+                        <p className="text-orange-400 text-xs">
+                          ⚠️ Warning: Live prune will permanently delete archives according to your retention policy.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Check Repository Section */}
+                <div className="mb-8">
+                  <h3 className="text-xl font-medium text-white mb-4">Check Repository</h3>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Verify repository consistency and integrity. Different check types provide varying levels of verification.
+                  </p>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">Config File:</label>
+                      <select
+                        className="w-full p-2 rounded-lg bg-gray-700 text-white text-sm border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                        value={repoConfig}
+                        onChange={e => setRepoConfig(e.target.value)}
+                      >
+                        {configFiles.map(f => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">Check Type:</label>
+                      <select
+                        className="w-full p-2 rounded-lg bg-gray-700 text-white text-sm border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                        value={checkType}
+                        onChange={e => setCheckType(e.target.value)}
+                      >
+                        <option value="repository">Repository Only (fastest)</option>
+                        <option value="archives">Archives Only</option>
+                        <option value="extract">Full Check (extract sample)</option>
+                        <option value="data">Verify Data (slowest, most thorough)</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {checkType === "repository" && "Checks repository structure and metadata"}
+                        {checkType === "archives" && "Checks archive metadata"}
+                        {checkType === "extract" && "Performs full consistency check with extraction test"}
+                        {checkType === "data" && "Verifies actual data integrity (slowest)"}
+                      </p>
+                    </div>
+                    
+                    <button
+                      className="w-full py-3 px-4 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      disabled={checkLoading}
+                      onClick={async () => {
+                        setCheckLoading(true);
+                        
+                        try {
+                          const res = await fetch("/api/check", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              config: repoConfig,
+                              check_type: checkType
+                            }),
+                          });
+                          
+                          const data = await res.json();
+                          
+                          if (res.ok) {
+                            // Navigate to jobs page to see progress
+                            setPage("jobs");
+                          } else {
+                            alert("Failed to start check: " + (data.error || "Unknown error"));
+                          }
+                        } catch (e) {
+                          alert("Failed to start check: " + e.message);
+                        }
+                        
+                        setCheckLoading(false);
+                      }}
+                    >
+                      {checkLoading && <LoadingSpinner />}
+                      {checkLoading ? "Starting..." : "Run Check"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
