@@ -4,4 +4,8 @@
 *.db
 init.lua
 HELPER.md
+FIXES.md
+IMPLEMENTATION.md
+TESTING.md
+BACKLOG.md
 dashborg.code-workspace
