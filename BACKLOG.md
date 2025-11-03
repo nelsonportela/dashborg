@@ -24,23 +24,24 @@
 #### 3. Backup Health Dashboard ✅
 - ✅ Last successful backup per repository
 - ✅ Job history with status tracking
+- ✅ **Repository integrity checks with 4 verification levels** - **IMPLEMENTED**
 - ⏳ Next scheduled backup time - **TODO: Add scheduling**
-- ⏳ Backup duration trends - **TODO: Add charts**
-- ⏳ Consistency check status (last check date) - **TODO: Add check operation**
+- ✅ **Interactive charts for storage trends and backup analysis** - **IMPLEMENTED**
 
 #### 4. Storage Analytics ✅
 - ✅ Deduplicated data size
 - ✅ Original data size
 - ✅ Space saved by deduplication (%)
-- ⏳ Growth rate (daily/weekly/monthly) - **TODO: Add trend analysis**
+- ✅ **Storage over time line chart with trend visualization** - **IMPLEMENTED**
 - ✅ Per-archive storage breakdown
+- ✅ **Interactive charts: storage trends, size distribution, pie charts** - **IMPLEMENTED**
 
 #### 5. Archive Browser ✅
 - ✅ Searchable/filterable list of all archives
 - ✅ Archive details: date, size, duration, stats
 - ✅ Group by repository (filter dropdown)
 - ✅ Sort by date
-- ⏳ Quick actions: info, mount, extract - **TODO: Add actions**
+- ✅ **Quick actions: mount (FUSE) and extract** - **IMPLEMENTED**
 
 #### 6. Database & Data Persistence ✅
 - ✅ SQLite database with SQLAlchemy ORM
@@ -102,10 +103,11 @@ borg list --json /path/to/repo
 - ✅ List archives (`borgmatic list --json`) - **IMPLEMENTED**
 - ✅ Stats/Dashboard page with repository and archive overview - **IMPLEMENTED**
 - ✅ SQLite database for persistent storage - **IMPLEMENTED**
-- [ ] Prune old archives (`borgmatic prune`)
-- [ ] Check repository consistency (`borgmatic check`)
-- [ ] Extract archives (`borgmatic extract`)
-- [ ] Mount archives for browsing (`borgmatic mount`)
+- ✅ Prune old archives (`borgmatic prune`) - **IMPLEMENTED** (with dry-run support)
+- ✅ Check repository consistency (`borgmatic check`) - **IMPLEMENTED** (4 verification levels)
+- ✅ Extract archives (`borgmatic extract`) - **IMPLEMENTED** (with custom destination)
+- ✅ Mount archives for browsing (`borgmatic mount`) - **IMPLEMENTED** (FUSE-based read-only)
+- ✅ Interactive charts on Stats page - **IMPLEMENTED** (storage trends, size distribution, deduplication)
 
 ### Advanced Features
 - [ ] Schedule backups (cron management)
