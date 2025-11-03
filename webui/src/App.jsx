@@ -1,6 +1,7 @@
 
 import { useState, useEffect } from "react";
 import SimpleYamlEditor from "./SimpleYamlEditor";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 // Loading spinner component
 function LoadingSpinner() {
@@ -985,6 +986,124 @@ export default function App() {
                           <div className="text-gray-400 text-sm mb-1">Space Saved</div>
                           <div className="text-3xl font-bold text-green-400">
                             {(dashboardStats.summary.deduplication_percentage || 0).toFixed(1)}%
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Charts Section */}
+                    {dashboardStats && dashboardStats.recent_archives && dashboardStats.recent_archives.length > 0 && (
+                      <div className="mb-8 space-y-6">
+                        {/* Storage Over Time Chart */}
+                        <div className="bg-gray-700 p-6 rounded-lg">
+                          <h3 className="text-lg font-semibold text-white mb-4">Storage Over Time</h3>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <LineChart data={dashboardStats.recent_archives.slice().reverse()}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                              <XAxis 
+                                dataKey="date" 
+                                stroke="#9CA3AF"
+                                tickFormatter={(value) => new Date(value).toLocaleDateString()}
+                                angle={-45}
+                                textAnchor="end"
+                                height={80}
+                              />
+                              <YAxis 
+                                stroke="#9CA3AF"
+                                tickFormatter={(value) => `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`}
+                              />
+                              <Tooltip 
+                                contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
+                                labelStyle={{ color: '#E5E7EB' }}
+                                formatter={(value) => [`${(value / 1024 / 1024 / 1024).toFixed(2)} GB`, '']}
+                                labelFormatter={(label) => new Date(label).toLocaleString()}
+                              />
+                              <Legend />
+                              <Line 
+                                type="monotone" 
+                                dataKey="original_size" 
+                                stroke="#8B5CF6" 
+                                name="Original Size"
+                                strokeWidth={2}
+                                dot={{ fill: '#8B5CF6' }}
+                              />
+                              <Line 
+                                type="monotone" 
+                                dataKey="deduplicated_size" 
+                                stroke="#10B981" 
+                                name="After Deduplication"
+                                strokeWidth={2}
+                                dot={{ fill: '#10B981' }}
+                              />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {/* Archive Size Distribution */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          <div className="bg-gray-700 p-6 rounded-lg">
+                            <h3 className="text-lg font-semibold text-white mb-4">Recent Archive Sizes</h3>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <BarChart data={dashboardStats.recent_archives.slice(0, 10)}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                                <XAxis 
+                                  dataKey="name" 
+                                  stroke="#9CA3AF"
+                                  angle={-45}
+                                  textAnchor="end"
+                                  height={100}
+                                  interval={0}
+                                  tick={{ fontSize: 10 }}
+                                />
+                                <YAxis 
+                                  stroke="#9CA3AF"
+                                  tickFormatter={(value) => `${(value / 1024 / 1024).toFixed(0)} MB`}
+                                />
+                                <Tooltip 
+                                  contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
+                                  labelStyle={{ color: '#E5E7EB' }}
+                                  formatter={(value) => [`${(value / 1024 / 1024).toFixed(2)} MB`, '']}
+                                />
+                                <Legend />
+                                <Bar dataKey="original_size" fill="#8B5CF6" name="Original" />
+                                <Bar dataKey="deduplicated_size" fill="#10B981" name="Deduplicated" />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {/* Storage Breakdown Pie Chart */}
+                          <div className="bg-gray-700 p-6 rounded-lg">
+                            <h3 className="text-lg font-semibold text-white mb-4">Storage Breakdown</h3>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <PieChart>
+                                <Pie
+                                  data={[
+                                    { 
+                                      name: 'Unique Data', 
+                                      value: dashboardStats.summary.total_unique_size || 0 
+                                    },
+                                    { 
+                                      name: 'Saved by Dedup', 
+                                      value: (dashboardStats.summary.total_original_size || 0) - (dashboardStats.summary.total_unique_size || 0) 
+                                    }
+                                  ]}
+                                  cx="50%"
+                                  cy="50%"
+                                  labelLine={false}
+                                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(1)}%`}
+                                  outerRadius={80}
+                                  fill="#8884d8"
+                                  dataKey="value"
+                                >
+                                  <Cell fill="#10B981" />
+                                  <Cell fill="#8B5CF6" />
+                                </Pie>
+                                <Tooltip 
+                                  contentStyle={{ backgroundColor: '#1F2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
+                                  formatter={(value) => `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`}
+                                />
+                              </PieChart>
+                            </ResponsiveContainer>
                           </div>
                         </div>
                       </div>
