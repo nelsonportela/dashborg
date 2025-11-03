@@ -14,3 +14,10 @@ services:
     restart: unless-stopped
     tty: true
     stdin_open: true
+    # FUSE support for mounting archives
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
