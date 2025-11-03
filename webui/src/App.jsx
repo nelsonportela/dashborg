@@ -115,6 +115,27 @@ export default function App() {
     return () => clearInterval(interval);
   }, [page]);
 
+  // Fetch archives and repositories for Backups page
+  useEffect(() => {
+    if (page !== "backups") return;
+    
+    const fetchBackupsData = () => {
+      Promise.all([
+        fetch("/api/archives?limit=100").then(r => r.json()),
+        fetch("/api/repositories").then(r => r.json())
+      ])
+        .then(([archivesData, reposData]) => {
+          setArchives(archivesData.archives || []);
+          setRepositories(reposData.repositories || []);
+        })
+        .catch(e => {
+          console.error("Failed to load backups data", e);
+        });
+    };
+    
+    fetchBackupsData();
+  }, [page]);
+
   // Fetch stats when on stats page
   useEffect(() => {
     if (page !== "stats") return;
@@ -124,12 +145,10 @@ export default function App() {
       
       Promise.all([
         fetch("/api/stats/dashboard").then(r => r.json()),
-        fetch("/api/archives?limit=100").then(r => r.json()),
         fetch("/api/repositories").then(r => r.json())
       ])
-        .then(([stats, archivesData, reposData]) => {
+        .then(([stats, reposData]) => {
           setDashboardStats(stats);
-          setArchives(archivesData.archives || []);
           setRepositories(reposData.repositories || []);
           setStatsLoading(false);
         })
@@ -620,6 +639,177 @@ export default function App() {
                   )}
                 </div>
                 
+                {/* Browse Archives Section */}
+                <div className="mb-8 pb-8 border-b border-gray-700">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-medium text-white">Browse Archives</h3>
+                    <button
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+                      disabled={syncLoading}
+                      onClick={async () => {
+                        if (!confirm('Sync archives from all repositories? This may take a while for large repositories.')) {
+                          return;
+                        }
+                        
+                        setSyncLoading(true);
+                        try {
+                          await fetch("/api/sync-archives", {
+                            method: "POST"
+                          });
+                          
+                          // Reload archives
+                          const res = await fetch("/api/archives?limit=100");
+                          const data = await res.json();
+                          setArchives(data.archives || []);
+                          
+                          alert('Archives synced successfully!');
+                        } catch (e) {
+                          alert('Failed to sync archives: ' + e.message);
+                        }
+                        setSyncLoading(false);
+                      }}
+                    >
+                      {syncLoading && <LoadingSpinner />}
+                      {syncLoading ? "Syncing..." : "🔄 Sync Archives"}
+                    </button>
+                  </div>
+                  
+                  <p className="text-sm text-gray-400 mb-4">
+                    View all backup archives from your repositories. Mount or extract archives to access their contents.
+                  </p>
+                  
+                  <div className="mb-4 flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Search archives..."
+                      className="flex-1 px-3 py-2 bg-gray-700 text-white text-sm rounded-lg border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                      value={archiveSearch}
+                      onChange={e => setArchiveSearch(e.target.value)}
+                    />
+                    <select
+                      className="px-3 py-2 bg-gray-700 text-white text-sm rounded-lg border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                      value={selectedRepository}
+                      onChange={e => setSelectedRepository(e.target.value)}
+                    >
+                      <option value="">All repositories</option>
+                      {repositories.map(r => (
+                        <option key={r.id} value={r.label}>{r.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {archives.length === 0 ? (
+                    <div className="text-gray-400 text-center py-8 bg-gray-700/30 rounded-lg">
+                      No archives found. Click "Sync Archives" to load archives from your repositories.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-700 text-gray-300">
+                          <tr>
+                            <th className="px-4 py-3 text-left">Archive Name</th>
+                            <th className="px-4 py-3 text-left">Repository</th>
+                            <th className="px-4 py-3 text-left">Date</th>
+                            <th className="px-4 py-3 text-right">Size (Original)</th>
+                            <th className="px-4 py-3 text-right">Size (Dedup)</th>
+                            <th className="px-4 py-3 text-right">Files</th>
+                            <th className="px-4 py-3 text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-gray-300">
+                          {archives
+                            .filter(a => 
+                              (!archiveSearch || a.name.toLowerCase().includes(archiveSearch.toLowerCase())) &&
+                              (!selectedRepository || a.repository === selectedRepository)
+                            )
+                            .slice(0, 50)
+                            .map(archive => (
+                              <tr key={archive.id} className="border-b border-gray-700 hover:bg-gray-700/50">
+                                <td className="px-4 py-3 font-mono text-xs">{archive.name}</td>
+                                <td className="px-4 py-3">{archive.repository}</td>
+                                <td className="px-4 py-3">{archive.start ? new Date(archive.start).toLocaleString() : "N/A"}</td>
+                                <td className="px-4 py-3 text-right">
+                                  {archive.original_size ? ((archive.original_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
+                                </td>
+                                <td className="px-4 py-3 text-right text-green-400">
+                                  {archive.deduplicated_size ? ((archive.deduplicated_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
+                                </td>
+                                <td className="px-4 py-3 text-right">{archive.nfiles?.toLocaleString() || "N/A"}</td>
+                                <td className="px-4 py-3">
+                                  <div className="flex gap-1 justify-center">
+                                    <button
+                                      className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white"
+                                      title="Extract archive"
+                                      onClick={async () => {
+                                        if (!confirm(`Extract archive "${archive.name}"?\n\nFiles will be extracted to: /mounts/extracts\n(accessible at ./mounts/extracts on host)`)) {
+                                          return;
+                                        }
+                                        
+                                        try {
+                                          const res = await fetch("/api/extract", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                              config: selectedConfig || configFiles[0],
+                                              archive: archive.name
+                                            })
+                                          });
+                                          
+                                          const data = await res.json();
+                                          if (res.ok) {
+                                            alert(`Extraction started! Job ID: ${data.job_id}\nDestination: ${data.destination}\n\nCheck Jobs page for progress.`);
+                                            setPage("jobs");
+                                          } else {
+                                            alert(`Failed to start extraction: ${data.error}`);
+                                          }
+                                        } catch (e) {
+                                          alert(`Error: ${e.message}`);
+                                        }
+                                      }}
+                                    >
+                                      📦 Extract
+                                    </button>
+                                    <button
+                                      className="px-2 py-1 text-xs rounded bg-purple-600 hover:bg-purple-500 text-white"
+                                      title="Mount archive (read-only)"
+                                      onClick={async () => {
+                                        if (!confirm(`Mount archive "${archive.name}" as read-only filesystem?\n\nMount point: /mounts/archives/${archive.name}\n(accessible at ./mounts/archives/${archive.name} on host)`)) {
+                                          return;
+                                        }
+                                        
+                                        try {
+                                          const res = await fetch("/api/mount", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({
+                                              config: selectedConfig || configFiles[0],
+                                              archive: archive.name
+                                            })
+                                          });
+                                          
+                                          const data = await res.json();
+                                          if (res.ok) {
+                                            alert(`Archive mounted!\nMount point: ${data.mount_point}\n\nYou can browse files using the "📁 Browse Files" button in the sidebar.`);
+                                          } else {
+                                            alert(`Failed to mount: ${data.error}`);
+                                          }
+                                        } catch (e) {
+                                          alert(`Error: ${e.message}`);
+                                        }
+                                      }}
+                                    >
+                                      📁 Mount
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+                
                 {/* Prune Archives Section */}
                 <div className="mb-8 pb-8 border-b border-gray-700">
                   <h3 className="text-xl font-medium text-white mb-4">Prune Archives</h3>
@@ -780,6 +970,148 @@ export default function App() {
                       {checkLoading ? "Starting..." : "Run Check"}
                     </button>
                   </div>
+                </div>
+                
+                {/* Create Repository Section */}
+                <div className="mb-8 pb-8 border-b border-gray-700">
+                  <h3 className="text-xl font-medium text-white mb-4">Create New Repository</h3>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Initialize a new Borg repository based on your borgmatic configuration. 
+                    If options are not specified, values from the config file will be used.
+                  </p>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">Config File:</label>
+                      <select
+                        className="w-full p-2 rounded-lg bg-gray-700 text-white text-sm border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                        value={repoConfig}
+                        onChange={e => setRepoConfig(e.target.value)}
+                      >
+                        {configFiles.map(f => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">
+                        Encryption Mode <span className="text-gray-500">(optional - uses config value if not set)</span>:
+                      </label>
+                      <select
+                        className="w-full p-2 rounded-lg bg-gray-700 text-white text-sm border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                        value={encryptionMode}
+                        onChange={e => setEncryptionMode(e.target.value)}
+                      >
+                        <option value="">-- Use config file value --</option>
+                        <option value="repokey">repokey</option>
+                        <option value="repokey-blake2">repokey-blake2</option>
+                        <option value="keyfile">keyfile</option>
+                        <option value="keyfile-blake2">keyfile-blake2</option>
+                        <option value="authenticated">authenticated</option>
+                        <option value="authenticated-blake2">authenticated-blake2</option>
+                        <option value="none">none</option>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">
+                        Storage Quota <span className="text-gray-500">(optional, e.g., "5G", "100M")</span>:
+                      </label>
+                      <input
+                        type="text"
+                        className="w-full p-2 rounded-lg bg-gray-700 text-white text-sm border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                        placeholder="e.g., 5G"
+                        value={storageQuota}
+                        onChange={e => setStorageQuota(e.target.value)}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <label className="flex items-center text-sm text-gray-300">
+                        <input
+                          type="checkbox"
+                          className="mr-2 rounded bg-gray-700 border-gray-600"
+                          checked={appendOnly}
+                          onChange={e => setAppendOnly(e.target.checked)}
+                        />
+                        Append-only mode
+                      </label>
+                      
+                      <label className="flex items-center text-sm text-gray-300">
+                        <input
+                          type="checkbox"
+                          className="mr-2 rounded bg-gray-700 border-gray-600"
+                          checked={makeParentDirs}
+                          onChange={e => setMakeParentDirs(e.target.checked)}
+                        />
+                        Create parent directories
+                      </label>
+                    </div>
+                    
+                    <button
+                      className="w-full py-3 px-4 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      disabled={repoCreateLoading}
+                      onClick={async () => {
+                        setRepoCreateLoading(true);
+                        setRepoCreateResult(null);
+                        setRepoCreateError("");
+                        
+                        try {
+                          const res = await fetch("/api/repo-create", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              config: repoConfig,
+                              encryption_mode: encryptionMode || undefined,
+                              append_only: appendOnly,
+                              storage_quota: storageQuota || undefined,
+                              make_parent_dirs: makeParentDirs,
+                            }),
+                          });
+                          
+                          const data = await res.json();
+                          
+                          if (data.success) {
+                            setRepoCreateResult(data.output);
+                          } else {
+                            setRepoCreateError(data.error || data.output || "Failed");
+                          }
+                        } catch (e) {
+                          setRepoCreateError("Failed to create repository: " + e.message);
+                        }
+                        
+                        setRepoCreateLoading(false);
+                      }}
+                    >
+                      {repoCreateLoading && <LoadingSpinner />}
+                      {repoCreateLoading ? "Creating Repository..." : "Create Repository"}
+                    </button>
+                    
+                    {repoCreateResult && (
+                      <div className="mt-4 p-4 bg-green-900/20 border border-green-700 rounded-lg">
+                        <p className="text-green-400 font-medium mb-2">✓ Success!</p>
+                        <pre className="text-xs text-green-300 whitespace-pre-wrap">{repoCreateResult}</pre>
+                      </div>
+                    )}
+                    
+                    {repoCreateError && (
+                      <div className="mt-4 p-4 bg-red-900/20 border border-red-700 rounded-lg">
+                        <p className="text-red-400 font-medium mb-2">✗ Error</p>
+                        <pre className="text-xs text-red-300 whitespace-pre-wrap">{repoCreateError}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="mt-4 text-gray-400 text-sm">
+                  <p className="mb-2">💡 Tips:</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>Browse and manage archives in the sections above</li>
+                    <li>Use mount for read-only filesystem access, extract to copy files out</li>
+                    <li>Backups run in the background - check the Jobs page for progress</li>
+                    <li>Configure backup sources in your borgmatic config file</li>
+                  </ul>
                 </div>
               </div>
             )}
@@ -1164,143 +1496,6 @@ export default function App() {
                         </div>
                       </div>
                     )}
-
-                    {/* Archives Table */}
-                    <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xl font-semibold text-white">Archives</h3>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Search archives..."
-                            className="px-3 py-2 bg-gray-700 text-white text-sm rounded-lg border border-gray-600 focus:ring-2 focus:ring-indigo-500"
-                            value={archiveSearch}
-                            onChange={e => setArchiveSearch(e.target.value)}
-                          />
-                          <select
-                            className="px-3 py-2 bg-gray-700 text-white text-sm rounded-lg border border-gray-600 focus:ring-2 focus:ring-indigo-500"
-                            value={selectedRepository}
-                            onChange={e => setSelectedRepository(e.target.value)}
-                          >
-                            <option value="">All repositories</option>
-                            {repositories.map(r => (
-                              <option key={r.id} value={r.label}>{r.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      
-                      {archives.length === 0 ? (
-                        <div className="text-gray-400 text-center py-8">
-                          No archives found. Click "Sync Data" to load archives from your repositories.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-700 text-gray-300">
-                              <tr>
-                                <th className="px-4 py-3 text-left">Archive Name</th>
-                                <th className="px-4 py-3 text-left">Repository</th>
-                                <th className="px-4 py-3 text-left">Date</th>
-                                <th className="px-4 py-3 text-right">Size (Original)</th>
-                                <th className="px-4 py-3 text-right">Size (Dedup)</th>
-                                <th className="px-4 py-3 text-right">Files</th>
-                                <th className="px-4 py-3 text-center">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="text-gray-300">
-                              {archives
-                                .filter(a => 
-                                  (!archiveSearch || a.name.toLowerCase().includes(archiveSearch.toLowerCase())) &&
-                                  (!selectedRepository || a.repository === selectedRepository)
-                                )
-                                .slice(0, 50)
-                                .map(archive => (
-                                  <tr key={archive.id} className="border-b border-gray-700 hover:bg-gray-700/50">
-                                    <td className="px-4 py-3 font-mono text-xs">{archive.name}</td>
-                                    <td className="px-4 py-3">{archive.repository}</td>
-                                    <td className="px-4 py-3">{archive.start ? new Date(archive.start).toLocaleString() : "N/A"}</td>
-                                    <td className="px-4 py-3 text-right">
-                                      {archive.original_size ? ((archive.original_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-green-400">
-                                      {archive.deduplicated_size ? ((archive.deduplicated_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
-                                    </td>
-                                    <td className="px-4 py-3 text-right">{archive.nfiles?.toLocaleString() || "N/A"}</td>
-                                    <td className="px-4 py-3">
-                                      <div className="flex gap-1 justify-center">
-                                        <button
-                                          className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white"
-                                          title="Extract archive"
-                                          onClick={async () => {
-                                            if (!confirm(`Extract archive "${archive.name}"?\n\nFiles will be extracted to: /mounts/extracts\n(accessible at ./mounts/extracts on host)`)) {
-                                              return;
-                                            }
-                                            
-                                            try {
-                                              const res = await fetch("/api/extract", {
-                                                method: "POST",
-                                                headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({
-                                                  config: selectedConfig || configFiles[0],
-                                                  archive: archive.name
-                                                })
-                                              });
-                                              
-                                              const data = await res.json();
-                                              if (res.ok) {
-                                                alert(`Extraction started! Job ID: ${data.job_id}\nDestination: ${data.destination}\n\nCheck Jobs page for progress.`);
-                                                setPage("jobs");
-                                              } else {
-                                                alert(`Failed to start extraction: ${data.error}`);
-                                              }
-                                            } catch (e) {
-                                              alert(`Error: ${e.message}`);
-                                            }
-                                          }}
-                                        >
-                                          📦 Extract
-                                        </button>
-                                        <button
-                                          className="px-2 py-1 text-xs rounded bg-purple-600 hover:bg-purple-500 text-white"
-                                          title="Mount archive (read-only)"
-                                          onClick={async () => {
-                                            if (!confirm(`Mount archive "${archive.name}" as read-only filesystem?\n\nNote: Mounting requires FUSE support in the container.`)) {
-                                              return;
-                                            }
-                                            
-                                            try {
-                                              const res = await fetch("/api/mount", {
-                                                method: "POST",
-                                                headers: { "Content-Type": "application/json" },
-                                                body: JSON.stringify({
-                                                  config: selectedConfig || configFiles[0],
-                                                  archive: archive.name
-                                                })
-                                              });
-                                              
-                                              const data = await res.json();
-                                              if (res.ok) {
-                                                alert(`Archive mounted!\nMount point: ${data.mount_point}\n\nYou can browse files at this location inside the container.`);
-                                              } else {
-                                                alert(`Failed to mount: ${data.error}`);
-                                              }
-                                            } catch (e) {
-                                              alert(`Error: ${e.message}`);
-                                            }
-                                          }}
-                                        >
-                                          📁 Mount
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
                   </>
                 )}
               </div>
