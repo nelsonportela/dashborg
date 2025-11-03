@@ -10,6 +10,7 @@ services:
       - ./destination:/destination
       - ~/.ssh:/root/.ssh:ro
       - ./config:/etc/borgmatic
+      - ./data:/data  # Persistent database storage
     restart: unless-stopped
     tty: true
     stdin_open: true

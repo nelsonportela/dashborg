@@ -1,5 +1,7 @@
 /source
 /config
+/data
+*.db
 init.lua
 HELPER.md
 dashborg.code-workspace

@@ -38,6 +38,15 @@ export default function App() {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
 
+  // Stats page state
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [archives, setArchives] = useState([]);
+  const [repositories, setRepositories] = useState([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [archiveSearch, setArchiveSearch] = useState("");
+  const [selectedRepository, setSelectedRepository] = useState("");
+
   // Clear messages when page changes
   useEffect(() => {
     setRepoCreateResult(null);
@@ -88,6 +97,33 @@ export default function App() {
     // Poll every 2 seconds for updates
     const interval = setInterval(fetchJobs, 2000);
     return () => clearInterval(interval);
+  }, [page]);
+
+  // Fetch stats when on stats page
+  useEffect(() => {
+    if (page !== "stats") return;
+    
+    const fetchStats = () => {
+      setStatsLoading(true);
+      
+      Promise.all([
+        fetch("/api/stats/dashboard").then(r => r.json()),
+        fetch("/api/archives?limit=100").then(r => r.json()),
+        fetch("/api/repositories").then(r => r.json())
+      ])
+        .then(([stats, archivesData, reposData]) => {
+          setDashboardStats(stats);
+          setArchives(archivesData.archives || []);
+          setRepositories(reposData.repositories || []);
+          setStatsLoading(false);
+        })
+        .catch(e => {
+          console.error("Failed to load stats", e);
+          setStatsLoading(false);
+        });
+    };
+    
+    fetchStats();
   }, [page]);
 
   return (
@@ -141,6 +177,17 @@ export default function App() {
                 }}
               >
                 Jobs
+              </button>
+            </li>
+            <li>
+              <button
+                className={`block w-full text-left py-2 px-4 rounded-lg text-sm font-medium transition-colors ${page === "stats" ? "bg-indigo-600 text-white" : "text-gray-300 hover:bg-gray-700 hover:text-white"}`}
+                onClick={() => {
+                  setEditing(false);
+                  setPage("stats");
+                }}
+              >
+                Stats
               </button>
             </li>
             <li>
@@ -700,6 +747,173 @@ export default function App() {
                       );
                     })}
                   </div>
+                )}
+              </div>
+            )}
+            {page === "stats" && (
+              <div className="w-full max-w-6xl bg-gray-800 rounded-lg p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-semibold text-white">Dashboard & Statistics</h2>
+                  <div className="flex gap-2">
+                    <button
+                      className="py-2 px-4 rounded-lg text-sm font-medium text-white bg-purple-600 hover:bg-purple-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      disabled={syncLoading}
+                      onClick={async () => {
+                        setSyncLoading(true);
+                        try {
+                          await fetch("/api/sync-repositories", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ config: selectedConfig || configFiles[0] })
+                          });
+                          await fetch("/api/sync-archives", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ config: selectedConfig || configFiles[0] })
+                          });
+                          // Reload stats
+                          setPage("landing");
+                          setTimeout(() => setPage("stats"), 100);
+                        } catch (e) {
+                          console.error("Sync failed", e);
+                        }
+                        setSyncLoading(false);
+                      }}
+                    >
+                      {syncLoading && <LoadingSpinner />}
+                      {syncLoading ? "Syncing..." : "Sync Data"}
+                    </button>
+                  </div>
+                </div>
+
+                {statsLoading ? (
+                  <div className="text-gray-400 text-center py-8">Loading statistics...</div>
+                ) : (
+                  <>
+                    {/* Summary Cards */}
+                    {dashboardStats && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                        <div className="bg-gray-700 p-6 rounded-lg">
+                          <div className="text-gray-400 text-sm mb-1">Total Archives</div>
+                          <div className="text-3xl font-bold text-white">
+                            {dashboardStats.summary.total_archives || 0}
+                          </div>
+                        </div>
+                        <div className="bg-gray-700 p-6 rounded-lg">
+                          <div className="text-gray-400 text-sm mb-1">Repositories</div>
+                          <div className="text-3xl font-bold text-white">
+                            {dashboardStats.summary.total_repositories || 0}
+                          </div>
+                        </div>
+                        <div className="bg-gray-700 p-6 rounded-lg">
+                          <div className="text-gray-400 text-sm mb-1">Storage Used</div>
+                          <div className="text-3xl font-bold text-white">
+                            {((dashboardStats.summary.total_unique_size || 0) / 1024 / 1024 / 1024).toFixed(1)} GB
+                          </div>
+                        </div>
+                        <div className="bg-gray-700 p-6 rounded-lg">
+                          <div className="text-gray-400 text-sm mb-1">Space Saved</div>
+                          <div className="text-3xl font-bold text-green-400">
+                            {(dashboardStats.summary.deduplication_percentage || 0).toFixed(1)}%
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Repositories Section */}
+                    {repositories.length > 0 && (
+                      <div className="mb-8">
+                        <h3 className="text-xl font-semibold text-white mb-4">Repositories</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {repositories.map(repo => (
+                            <div key={repo.id} className="bg-gray-700 p-4 rounded-lg">
+                              <div className="flex items-start justify-between mb-2">
+                                <div>
+                                  <div className="text-white font-semibold">{repo.label}</div>
+                                  <div className="text-xs text-gray-400 font-mono break-all">{repo.location}</div>
+                                </div>
+                                <span className="text-xs bg-gray-600 px-2 py-1 rounded text-gray-300">
+                                  {repo.archive_count} archives
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-400 mt-2">
+                                Encryption: {repo.encryption_mode || "N/A"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Archives Table */}
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-semibold text-white">Archives</h3>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Search archives..."
+                            className="px-3 py-2 bg-gray-700 text-white text-sm rounded-lg border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                            value={archiveSearch}
+                            onChange={e => setArchiveSearch(e.target.value)}
+                          />
+                          <select
+                            className="px-3 py-2 bg-gray-700 text-white text-sm rounded-lg border border-gray-600 focus:ring-2 focus:ring-indigo-500"
+                            value={selectedRepository}
+                            onChange={e => setSelectedRepository(e.target.value)}
+                          >
+                            <option value="">All repositories</option>
+                            {repositories.map(r => (
+                              <option key={r.id} value={r.label}>{r.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      
+                      {archives.length === 0 ? (
+                        <div className="text-gray-400 text-center py-8">
+                          No archives found. Click "Sync Data" to load archives from your repositories.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-700 text-gray-300">
+                              <tr>
+                                <th className="px-4 py-3 text-left">Archive Name</th>
+                                <th className="px-4 py-3 text-left">Repository</th>
+                                <th className="px-4 py-3 text-left">Date</th>
+                                <th className="px-4 py-3 text-right">Size (Original)</th>
+                                <th className="px-4 py-3 text-right">Size (Dedup)</th>
+                                <th className="px-4 py-3 text-right">Files</th>
+                              </tr>
+                            </thead>
+                            <tbody className="text-gray-300">
+                              {archives
+                                .filter(a => 
+                                  (!archiveSearch || a.name.toLowerCase().includes(archiveSearch.toLowerCase())) &&
+                                  (!selectedRepository || a.repository === selectedRepository)
+                                )
+                                .slice(0, 50)
+                                .map(archive => (
+                                  <tr key={archive.id} className="border-b border-gray-700 hover:bg-gray-700/50">
+                                    <td className="px-4 py-3 font-mono text-xs">{archive.name}</td>
+                                    <td className="px-4 py-3">{archive.repository}</td>
+                                    <td className="px-4 py-3">{archive.start ? new Date(archive.start).toLocaleString() : "N/A"}</td>
+                                    <td className="px-4 py-3 text-right">
+                                      {archive.original_size ? ((archive.original_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
+                                    </td>
+                                    <td className="px-4 py-3 text-right text-green-400">
+                                      {archive.deduplicated_size ? ((archive.deduplicated_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
+                                    </td>
+                                    <td className="px-4 py-3 text-right">{archive.nfiles?.toLocaleString() || "N/A"}</td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             )}
