@@ -211,7 +211,7 @@ export default function App() {
         </nav>
       </aside>
       {/* Main Content */}
-      <main className="flex-1 flex flex-col px-8 bg-gray-950 overflow-hidden">
+      <main className="flex-1 flex flex-col px-8 bg-gray-950 overflow-y-auto">
         {editing ? (
           <div className="w-full h-full flex flex-col p-6 overflow-hidden">
             <div className="flex items-center justify-between mb-4 flex-shrink-0">
@@ -280,16 +280,16 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col justify-center items-center text-center">
+          <div className="flex-1 flex flex-col items-center py-8">
             {page === "landing" && (
-              <>
+              <div className="flex flex-col justify-center items-center text-center flex-1">
                 <h2 className="text-3xl font-bold text-white mb-4">
                   Welcome to DashBorg
                 </h2>
                 <p className="text-base text-gray-400 max-w-2xl mb-8">
                   Manage your Borgmatic backups with ease. Select an option from the menu to get started.
                 </p>
-              </>
+              </div>
             )}
             {page === "config" && (
               <div className="w-full max-w-xl bg-gray-800 rounded-lg p-8 flex flex-col items-center">
