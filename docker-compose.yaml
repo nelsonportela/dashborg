@@ -11,6 +11,7 @@ services:
       - ~/.ssh:/root/.ssh:ro
       - ./config:/etc/borgmatic
       - ./data:/data  # Persistent database storage
+      - ./mounts:/mounts  # FUSE mounts and extracts
     restart: unless-stopped
     tty: true
     stdin_open: true

@@ -1,6 +1,7 @@
 /source
 /config
 /data
+/mounts
 *.db
 init.lua
 HELPER.md

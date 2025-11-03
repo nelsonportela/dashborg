@@ -425,7 +425,7 @@ async def mount_archive(request: Request):
         data = await request.json()
         config_file = data.get("config", "config.yaml")
         archive_name = data.get("archive")
-        mount_point = data.get("mount_point", f"/tmp/borg-mount-{archive_name}")
+        mount_point = data.get("mount_point", f"/mounts/archives/{archive_name}")
         
         if not archive_name:
             return JSONResponse({"error": "Archive name is required"}, status_code=400)
@@ -524,6 +524,78 @@ def list_mounted_archives():
     """List currently mounted archives."""
     return JSONResponse({"mounted": list(mounted_archives.values())})
 
+@app.get("/api/browse")
+def browse_files(path: str = "/mounts"):
+    """Browse files in a directory (for mounted archives and extracts)."""
+    try:
+        # Security: Only allow browsing within /mounts directory
+        if not path.startswith("/mounts"):
+            return JSONResponse({"error": "Access denied"}, status_code=403)
+        
+        # Check if path exists
+        if not os.path.exists(path):
+            return JSONResponse({"error": "Path not found"}, status_code=404)
+        
+        # Check if it's a directory
+        if not os.path.isdir(path):
+            return JSONResponse({"error": "Not a directory"}, status_code=400)
+        
+        # List directory contents
+        items = []
+        try:
+            for item in sorted(os.listdir(path)):
+                item_path = os.path.join(path, item)
+                is_dir = os.path.isdir(item_path)
+                
+                stat_info = os.stat(item_path)
+                items.append({
+                    "name": item,
+                    "path": item_path,
+                    "is_directory": is_dir,
+                    "size": stat_info.st_size if not is_dir else None,
+                    "modified": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                    "permissions": oct(stat_info.st_mode)[-3:]
+                })
+        except PermissionError:
+            return JSONResponse({"error": "Permission denied"}, status_code=403)
+        
+        # Get parent directory
+        parent = os.path.dirname(path) if path != "/mounts" else None
+        
+        return JSONResponse({
+            "current_path": path,
+            "parent_path": parent,
+            "items": items
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/download")
+def download_file(path: str):
+    """Download a file from mounted archives or extracts."""
+    try:
+        # Security: Only allow downloads from /mounts directory
+        if not path.startswith("/mounts"):
+            return JSONResponse({"error": "Access denied"}, status_code=403)
+        
+        # Check if file exists
+        if not os.path.exists(path):
+            return JSONResponse({"error": "File not found"}, status_code=404)
+        
+        # Check if it's a file (not directory)
+        if not os.path.isfile(path):
+            return JSONResponse({"error": "Not a file"}, status_code=400)
+        
+        # Return file
+        filename = os.path.basename(path)
+        return FileResponse(
+            path=path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.post("/api/extract")
 async def extract_archive(request: Request):
     """Extract files from an archive."""
@@ -531,7 +603,7 @@ async def extract_archive(request: Request):
         data = await request.json()
         config_file = data.get("config", "config.yaml")
         archive_name = data.get("archive")
-        destination = data.get("destination", "/tmp/borg-extract")
+        destination = data.get("destination", "/mounts/extracts")
         paths = data.get("paths", [])  # Specific paths to extract, empty = all
         
         if not archive_name:

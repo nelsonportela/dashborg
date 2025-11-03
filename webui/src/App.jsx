@@ -55,6 +55,13 @@ export default function App() {
   const [syncLoading, setSyncLoading] = useState(false);
   const [archiveSearch, setArchiveSearch] = useState("");
   const [selectedRepository, setSelectedRepository] = useState("");
+  
+  // File browser state
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [browserPath, setBrowserPath] = useState("/mounts");
+  const [browserItems, setBrowserItems] = useState([]);
+  const [browserLoading, setBrowserLoading] = useState(false);
+  const [browserParent, setBrowserParent] = useState(null);
 
   // Clear messages when page changes
   useEffect(() => {
@@ -197,6 +204,30 @@ export default function App() {
                 }}
               >
                 Stats
+              </button>
+            </li>
+            <li>
+              <button
+                className={`block w-full text-left py-2 px-4 rounded-lg text-sm font-medium transition-colors ${showBrowser ? "bg-indigo-600 text-white" : "text-gray-300 hover:bg-gray-700 hover:text-white"}`}
+                onClick={async () => {
+                  setShowBrowser(!showBrowser);
+                  if (!showBrowser) {
+                    // Load root directory
+                    setBrowserLoading(true);
+                    try {
+                      const res = await fetch(`/api/browse?path=${encodeURIComponent("/mounts")}`);
+                      const data = await res.json();
+                      setBrowserPath(data.current_path);
+                      setBrowserItems(data.items || []);
+                      setBrowserParent(data.parent_path);
+                    } catch (e) {
+                      console.error("Failed to browse", e);
+                    }
+                    setBrowserLoading(false);
+                  }
+                }}
+              >
+                📁 Browse Files
               </button>
             </li>
             <li>
@@ -1202,8 +1233,9 @@ export default function App() {
                                           className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white"
                                           title="Extract archive"
                                           onClick={async () => {
-                                            const destination = prompt(`Extract to: (default: /tmp/borg-extract)`, `/tmp/borg-extract`);
-                                            if (destination === null) return;
+                                            if (!confirm(`Extract archive "${archive.name}"?\n\nFiles will be extracted to: /mounts/extracts\n(accessible at ./mounts/extracts on host)`)) {
+                                              return;
+                                            }
                                             
                                             try {
                                               const res = await fetch("/api/extract", {
@@ -1211,8 +1243,7 @@ export default function App() {
                                                 headers: { "Content-Type": "application/json" },
                                                 body: JSON.stringify({
                                                   config: selectedConfig || configFiles[0],
-                                                  archive: archive.name,
-                                                  destination: destination || "/tmp/borg-extract"
+                                                  archive: archive.name
                                                 })
                                               });
                                               
@@ -1277,6 +1308,120 @@ export default function App() {
           </div>
         )}
       </main>
+      
+      {/* File Browser Modal */}
+      {showBrowser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowBrowser(false)}>
+          <div className="bg-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white">File Browser</h2>
+              <button
+                className="text-gray-400 hover:text-white"
+                onClick={() => setShowBrowser(false)}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-gray-400 text-sm">Path:</span>
+              <code className="flex-1 px-3 py-2 bg-gray-900 text-white text-sm rounded font-mono">{browserPath}</code>
+              {browserParent && (
+                <button
+                  className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded"
+                  onClick={async () => {
+                    setBrowserLoading(true);
+                    try {
+                      const res = await fetch(`/api/browse?path=${encodeURIComponent(browserParent)}`);
+                      const data = await res.json();
+                      setBrowserPath(data.current_path);
+                      setBrowserItems(data.items || []);
+                      setBrowserParent(data.parent_path);
+                    } catch (e) {
+                      console.error("Failed to browse", e);
+                    }
+                    setBrowserLoading(false);
+                  }}
+                >
+                  ⬆️ Up
+                </button>
+              )}
+            </div>
+            
+            <div className="flex-1 overflow-y-auto bg-gray-900 rounded">
+              {browserLoading ? (
+                <div className="text-gray-400 text-center py-8">Loading...</div>
+              ) : browserItems.length === 0 ? (
+                <div className="text-gray-400 text-center py-8">No files or directories</div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-700 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-white">Name</th>
+                      <th className="px-4 py-2 text-right text-white">Size</th>
+                      <th className="px-4 py-2 text-left text-white">Modified</th>
+                      <th className="px-4 py-2 text-center text-white">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {browserItems.map((item, idx) => (
+                      <tr key={idx} className="border-b border-gray-700 hover:bg-gray-800">
+                        <td className="px-4 py-2">
+                          <button
+                            className="text-left w-full flex items-center gap-2 text-white hover:text-indigo-400"
+                            disabled={!item.is_directory}
+                            onClick={async () => {
+                              if (item.is_directory) {
+                                setBrowserLoading(true);
+                                try {
+                                  const res = await fetch(`/api/browse?path=${encodeURIComponent(item.path)}`);
+                                  const data = await res.json();
+                                  setBrowserPath(data.current_path);
+                                  setBrowserItems(data.items || []);
+                                  setBrowserParent(data.parent_path);
+                                } catch (e) {
+                                  console.error("Failed to browse", e);
+                                }
+                                setBrowserLoading(false);
+                              }
+                            }}
+                          >
+                            <span>{item.is_directory ? "📁" : "📄"}</span>
+                            <span className="font-mono text-sm">{item.name}</span>
+                          </button>
+                        </td>
+                        <td className="px-4 py-2 text-right text-gray-400 text-sm">
+                          {item.size !== null ? (
+                            item.size > 1024 * 1024 ? 
+                              `${(item.size / 1024 / 1024).toFixed(2)} MB` :
+                              item.size > 1024 ?
+                                `${(item.size / 1024).toFixed(2)} KB` :
+                                `${item.size} B`
+                          ) : '-'}
+                        </td>
+                        <td className="px-4 py-2 text-gray-400 text-sm">
+                          {new Date(item.modified).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 text-center">
+                          {!item.is_directory && (
+                            <a
+                              href={`/api/download?path=${encodeURIComponent(item.path)}`}
+                              download={item.name}
+                              className="px-2 py-1 text-xs rounded bg-green-600 hover:bg-green-500 text-white inline-block"
+                            >
+                              ⬇️ Download
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
