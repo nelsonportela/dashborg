@@ -1,7 +1,7 @@
 
 FROM python:3.11-slim
 
-# Install system dependencies and CLI tools (keep openssh-client and pipx)
+# Install system dependencies and Node.js 18
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
@@ -9,19 +9,28 @@ RUN apt-get update && \
         ca-certificates \
         openssh-client \
         nano \
-    && rm -rf /var/lib/apt/lists/*
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
-# Download Borg binary
-RUN curl -L -o /usr/local/bin/borg https://github.com/borgbackup/borg/releases/download/1.4.1/borg-linux-glibc236 \
-    && chmod +x /usr/local/bin/borg
+# Install Borg and Borgmatic
+RUN curl -L -o /usr/local/bin/borg https://github.com/borgbackup/borg/releases/download/1.4.2/borg-linux-glibc231-x86_64 \
+    && chmod +x /usr/local/bin/borg \
+    && pipx ensurepath && pipx install borgmatic
 
-# Install borgmatic using pipx
-RUN pipx ensurepath && pipx install borgmatic
-
-# Add pipx binaries to PATH
 ENV PATH="/root/.local/bin:$PATH"
 
-# Create folders for mounting
-RUN mkdir -p /source /destination /etc/borgmatic
+# Build frontend
+WORKDIR /app/webui
+COPY webui/package.json webui/package-lock.json* ./
+RUN npm install
+COPY webui ./
+RUN npm run build
 
-WORKDIR /etc/borgmatic
+# Setup backend
+WORKDIR /app/webapi
+COPY webapi/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY webapi ./
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
