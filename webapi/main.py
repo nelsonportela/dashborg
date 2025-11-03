@@ -520,19 +520,20 @@ async def sync_repositories(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/sync-archives")
 async def sync_archives(request: Request, db: Session = Depends(get_db)):
-    """Sync all archives from all repositories to database."""
+    """Sync all archives from all repositories to database using two-step approach."""
     try:
         data = await request.json()
         config_file = data.get("config", "config.yaml")
         
-        # Use borg list --json directly to get ALL archives (bypasses archive_name_format filter)
-        cmd = ["borgmatic", "list", "--config", f"/etc/borgmatic/{config_file}", "--json"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        # Step 1: Use borgmatic list with --match-archives "*" to get ALL archive names
+        # This bypasses archive_name_format filter
+        list_cmd = ["borgmatic", "list", "--config", f"/etc/borgmatic/{config_file}", "--json", "--match-archives", "*"]
+        list_result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=60)
         
-        if result.returncode != 0:
-            return JSONResponse({"error": result.stderr}, status_code=500)
+        if list_result.returncode != 0:
+            return JSONResponse({"error": list_result.stderr}, status_code=500)
         
-        list_data = json.loads(result.stdout)
+        list_data = json.loads(list_result.stdout)
         synced_archives = []
         
         for repo_data in list_data:
@@ -549,14 +550,60 @@ async def sync_archives(request: Request, db: Session = Depends(get_db)):
                 db.add(repo)
                 db.flush()
             
-            # Process archives
-            for archive_data in repo_data.get("archives", []):
-                # Check if archive exists
-                archive = db.query(Archive).filter(
-                    Archive.archive_id == archive_data.get("id")
+            # Step 2: For each archive, fetch detailed info
+            for archive_basic in repo_data.get("archives", []):
+                archive_name = archive_basic.get("name")
+                
+                # Check if archive already exists in database
+                existing_archive = db.query(Archive).filter(
+                    Archive.archive_id == archive_basic.get("id")
                 ).first()
                 
-                if not archive:
+                if existing_archive:
+                    continue  # Skip if already synced
+                
+                # Fetch detailed info for this specific archive
+                info_cmd = ["borgmatic", "info", "--config", f"/etc/borgmatic/{config_file}", "--json", "--archive", archive_name]
+                info_result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=30)
+                
+                if info_result.returncode != 0:
+                    # If info fails, create archive with basic data only
+                    start_time = None
+                    if archive_basic.get("start"):
+                        try:
+                            start_time = datetime.fromisoformat(archive_basic["start"].replace("Z", "+00:00"))
+                        except:
+                            pass
+                    
+                    archive = Archive(
+                        repository_id=repo.id,
+                        name=archive_name,
+                        archive_id=archive_basic.get("id"),
+                        start=start_time
+                    )
+                    db.add(archive)
+                    synced_archives.append(archive_name)
+                    continue
+                
+                # Parse detailed info
+                try:
+                    info_data = json.loads(info_result.stdout)
+                    if isinstance(info_data, list) and len(info_data) > 0:
+                        info_repo = info_data[0]
+                        if "archives" in info_repo and len(info_repo["archives"]) > 0:
+                            archive_data = info_repo["archives"][0]  # Get the first (and only) archive
+                        else:
+                            continue
+                    else:
+                        continue
+                except json.JSONDecodeError:
+                    continue
+                
+                # Process archive with full details
+                archive_data = info_repo["archives"][0]
+                
+                # Create archive with detailed stats
+                if archive_data:
                     # Parse timestamps
                     start_time = None
                     if archive_data.get("start"):
