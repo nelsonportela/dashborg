@@ -255,6 +255,8 @@ def run_job_in_background(job_id: str, cmd: list, job_type: str, config_file: st
             started_at=datetime.fromisoformat(jobs[job_id]["started_at"]) if jobs[job_id].get("started_at") else None,
             completed_at=datetime.fromisoformat(jobs[job_id]["completed_at"]) if jobs[job_id].get("completed_at") else None,
             files_processed=jobs[job_id]["progress_info"].get("files_processed", 0),
+            current_file=jobs[job_id]["progress_info"].get("current_file"),
+            last_progress_update=datetime.fromisoformat(jobs[job_id]["progress_info"]["last_update"]) if jobs[job_id]["progress_info"].get("last_update") else None,
             return_code=jobs[job_id].get("return_code"),
             output=jobs[job_id].get("output", ""),
             error=jobs[job_id].get("error"),
@@ -313,26 +315,115 @@ async def create_backup(request: Request, db: Session = Depends(get_db)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/jobs")
-def list_jobs():
-    """List all jobs."""
-    # Return jobs sorted by created_at, newest first
-    sorted_jobs = sorted(jobs.values(), key=lambda x: x.get("created_at", ""), reverse=True)
-    return JSONResponse(sorted_jobs)
+def list_jobs(db: Session = Depends(get_db), limit: int = 50, offset: int = 0):
+    """List all jobs from database and merge with in-memory active jobs."""
+    try:
+        # Get jobs from database
+        db_jobs = db.query(BackupJob)\
+            .order_by(desc(BackupJob.created_at))\
+            .offset(offset)\
+            .limit(limit)\
+            .all()
+        
+        # Convert database jobs to dict format
+        job_list = []
+        for db_job in db_jobs:
+            job_dict = {
+                "id": db_job.job_id,
+                "type": db_job.job_type,
+                "command": db_job.command,
+                "config": db_job.config_file,
+                "status": db_job.status,
+                "created_at": db_job.created_at.isoformat() if db_job.created_at else None,
+                "started_at": db_job.started_at.isoformat() if db_job.started_at else None,
+                "completed_at": db_job.completed_at.isoformat() if db_job.completed_at else None,
+                "return_code": db_job.return_code,
+                "output": db_job.output,
+                "error": db_job.error,
+                "stats": db_job.stats,
+                "progress_info": {
+                    "files_processed": db_job.files_processed or 0,
+                    "current_file": db_job.current_file,
+                    "last_update": None
+                }
+            }
+            job_list.append(job_dict)
+        
+        # Merge with in-memory jobs (for active/pending jobs not yet persisted)
+        in_memory_ids = set()
+        for job_id, job_data in jobs.items():
+            in_memory_ids.add(job_id)
+            # Check if this job is already in database list
+            if not any(j["id"] == job_id for j in job_list):
+                job_list.append(job_data)
+        
+        # Update database jobs with in-memory data if they're still active
+        for i, job in enumerate(job_list):
+            if job["id"] in jobs:
+                # Override with latest in-memory data for active jobs
+                job_list[i] = jobs[job["id"]]
+        
+        # Sort by created_at, newest first
+        job_list.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        return JSONResponse(job_list)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/jobs/{job_id}")
-def get_job(job_id: str):
+def get_job(job_id: str, db: Session = Depends(get_db)):
     """Get a specific job status."""
-    if job_id not in jobs:
+    # First check in-memory jobs for active jobs
+    if job_id in jobs:
+        return JSONResponse(jobs[job_id])
+    
+    # Otherwise check database for historical jobs
+    db_job = db.query(BackupJob).filter(BackupJob.job_id == job_id).first()
+    if not db_job:
         return JSONResponse({"error": "Job not found"}, status_code=404)
-    return JSONResponse(jobs[job_id])
+    
+    return JSONResponse({
+        "id": db_job.job_id,
+        "type": db_job.job_type,
+        "command": db_job.command,
+        "config": db_job.config_file,
+        "status": db_job.status,
+        "created_at": db_job.created_at.isoformat() if db_job.created_at else None,
+        "started_at": db_job.started_at.isoformat() if db_job.started_at else None,
+        "completed_at": db_job.completed_at.isoformat() if db_job.completed_at else None,
+        "return_code": db_job.return_code,
+        "output": db_job.output,
+        "error": db_job.error,
+        "stats": db_job.stats,
+        "progress_info": {
+            "files_processed": db_job.files_processed or 0,
+            "current_file": db_job.current_file,
+            "last_update": db_job.last_progress_update.isoformat() if db_job.last_progress_update else None
+        }
+    })
 
 @app.delete("/api/jobs/{job_id}")
-def delete_job(job_id: str):
-    """Delete a job from history."""
-    if job_id not in jobs:
-        return JSONResponse({"error": "Job not found"}, status_code=404)
-    del jobs[job_id]
-    return JSONResponse({"message": "Job deleted"})
+def delete_job(job_id: str, db: Session = Depends(get_db)):
+    """Delete a job from history (both in-memory and database)."""
+    try:
+        # Delete from in-memory jobs
+        if job_id in jobs:
+            del jobs[job_id]
+        
+        # Delete from database
+        db_job = db.query(BackupJob).filter(BackupJob.job_id == job_id).first()
+        if db_job:
+            db.delete(db_job)
+            db.commit()
+            return JSONResponse({"message": "Job deleted from database"})
+        
+        if job_id not in jobs and not db_job:
+            return JSONResponse({"error": "Job not found"}, status_code=404)
+        
+        return JSONResponse({"message": "Job deleted"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/borgmatic/{command}")
 def run_borgmatic_command(command: str):
