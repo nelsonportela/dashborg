@@ -585,19 +585,26 @@ export default function App() {
                           </div>
                           
                           {/* Show progress for running jobs */}
-                          {job.status === "running" && latestProgress && (
-                            <div className="mt-2 text-xs text-blue-300">
-                              {latestProgress.message && <div>📝 {latestProgress.message}</div>}
-                              {latestProgress.path && <div>📁 {latestProgress.path}</div>}
-                              {latestProgress.current && latestProgress.total && (
-                                <div className="mt-1">
-                                  Progress: {latestProgress.current} / {latestProgress.total}
-                                  <div className="w-full bg-gray-700 rounded-full h-2 mt-1">
-                                    <div 
-                                      className="bg-blue-500 h-2 rounded-full transition-all"
-                                      style={{width: `${(latestProgress.current / latestProgress.total * 100).toFixed(1)}%`}}
-                                    ></div>
-                                  </div>
+                          {job.status === "running" && job.progress_info && (
+                            <div className="mt-2 text-xs text-blue-300 space-y-1">
+                              {job.progress_info.files_processed > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-blue-400 font-semibold">
+                                    {job.progress_info.files_processed.toLocaleString()} files processed
+                                  </span>
+                                </div>
+                              )}
+                              {job.progress_info.current_file && (
+                                <div className="flex items-start gap-2">
+                                  <span className="text-gray-400 flex-shrink-0">📄</span>
+                                  <span className="text-blue-200 font-mono text-xs break-all line-clamp-2">
+                                    {job.progress_info.current_file}
+                                  </span>
+                                </div>
+                              )}
+                              {job.progress_info.last_update && (
+                                <div className="text-gray-500 text-xs">
+                                  Last update: {new Date(job.progress_info.last_update).toLocaleTimeString()}
                                 </div>
                               )}
                             </div>

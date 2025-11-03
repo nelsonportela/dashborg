@@ -132,7 +132,7 @@ async def create_repository(request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-def run_job_in_background(job_id: str, cmd: list, job_type: str):
+def run_job_in_background(job_id: str, cmd: list, job_type: str, config_file: str = None):
     """Run a command in background and track its status with real-time progress."""
     import json
     
@@ -140,6 +140,11 @@ def run_job_in_background(job_id: str, cmd: list, job_type: str):
     jobs[job_id]["started_at"] = datetime.now().isoformat()
     jobs[job_id]["stats"] = None
     jobs[job_id]["output_lines"] = []
+    jobs[job_id]["progress_info"] = {
+        "current_file": None,
+        "files_processed": 0,
+        "last_update": None
+    }
     
     try:
         # Run process with combined output (stderr redirected to stdout)
@@ -153,6 +158,7 @@ def run_job_in_background(job_id: str, cmd: list, job_type: str):
         )
         
         all_lines = []
+        files_processed = 0
         
         # Read output line by line
         while True:
@@ -166,14 +172,16 @@ def run_job_in_background(job_id: str, cmd: list, job_type: str):
                     all_lines.append(line)
                     jobs[job_id]["output_lines"].append(line)
                     
-                    # Try to parse JSON statistics (borgmatic returns array with single object)
-                    if line.startswith('[{'):
-                        try:
-                            data = json.loads(line)
-                            if isinstance(data, list) and len(data) > 0:
-                                jobs[job_id]["stats"] = data[0]  # Extract first item
-                        except json.JSONDecodeError:
-                            pass
+                    # Track file progress (lines starting with single character like 'A', 'M', 'U' followed by space and path)
+                    # Example: "A /path/to/file" (A = Added, M = Modified, U = Unchanged)
+                    if len(line) > 2 and line[0] in ['A', 'M', 'U', '-'] and line[1] == ' ':
+                        files_processed += 1
+                        current_file = line[2:] if len(line) > 2 else ""
+                        jobs[job_id]["progress_info"] = {
+                            "current_file": current_file,
+                            "files_processed": files_processed,
+                            "last_update": datetime.now().isoformat()
+                        }
         
         # Wait for process to complete
         return_code = process.wait()
@@ -181,6 +189,41 @@ def run_job_in_background(job_id: str, cmd: list, job_type: str):
         jobs[job_id]["status"] = "completed" if return_code == 0 else "failed"
         jobs[job_id]["output"] = "\n".join(all_lines) if all_lines else "No output"
         jobs[job_id]["return_code"] = return_code
+        
+        # If backup completed successfully, fetch statistics separately
+        if return_code == 0 and job_type == "backup-create" and config_file:
+            try:
+                # Run borgmatic info to get the last archive stats with JSON
+                info_cmd = [
+                    "borgmatic", "info",
+                    "--config", f"/etc/borgmatic/{config_file}",
+                    "--archive", "latest",
+                    "--json"
+                ]
+                result = subprocess.run(info_cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0 and result.stdout:
+                    try:
+                        data = json.loads(result.stdout)
+                        if isinstance(data, list) and len(data) > 0:
+                            info_data = data[0]
+                            # Transform borgmatic info structure to match create --json structure
+                            # info returns: {"archives": [...], "repository": {...}, "encryption": {...}, "cache": {...}}
+                            # We need: {"archive": {...}, "repository": {...}, "encryption": {...}}
+                            if "archives" in info_data and len(info_data["archives"]) > 0:
+                                transformed = {
+                                    "archive": info_data["archives"][0],  # Get the latest archive
+                                    "repository": info_data.get("repository", {}),
+                                    "encryption": info_data.get("encryption", {}),
+                                    "cache": info_data.get("cache", {})
+                                }
+                                jobs[job_id]["stats"] = transformed
+                            else:
+                                jobs[job_id]["stats"] = info_data
+                    except json.JSONDecodeError:
+                        pass
+            except Exception as e:
+                # Don't fail the job if stats fetch fails
+                jobs[job_id]["stats_error"] = str(e)
         
     except Exception as e:
         jobs[job_id]["status"] = "failed"
@@ -199,14 +242,14 @@ async def create_backup(request: Request):
         # Generate job ID
         job_id = str(uuid.uuid4())
         
-        # Build command - Note: --progress and --json together can cause issues
-        # Using --json for final stats, progress will be in text format
+        # Build command - Using --list to show files being processed
+        # Note: --list and --json cannot be used together, so we fetch stats separately after completion
         cmd = [
             "borgmatic", "create", 
             "--config", f"/etc/borgmatic/{config_file}",
             "--verbosity", "1",
-            "--stats",
-            "--json"
+            "--list",  # Show files being backed up for progress tracking
+            "--stats"  # Show text statistics (JSON stats fetched separately after completion)
         ]
         
         # Initialize job
@@ -219,10 +262,15 @@ async def create_backup(request: Request):
             "config": config_file,
             "stats": None,
             "output_lines": [],
+            "progress_info": {
+                "current_file": None,
+                "files_processed": 0,
+                "last_update": None
+            }
         }
         
-        # Run in background thread
-        thread = threading.Thread(target=run_job_in_background, args=(job_id, cmd, "backup-create"))
+        # Run in background thread, passing config_file for stats fetching
+        thread = threading.Thread(target=run_job_in_background, args=(job_id, cmd, "backup-create", config_file))
         thread.daemon = True
         thread.start()
         
