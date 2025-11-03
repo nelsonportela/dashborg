@@ -1174,6 +1174,7 @@ export default function App() {
                                 <th className="px-4 py-3 text-right">Size (Original)</th>
                                 <th className="px-4 py-3 text-right">Size (Dedup)</th>
                                 <th className="px-4 py-3 text-right">Files</th>
+                                <th className="px-4 py-3 text-center">Actions</th>
                               </tr>
                             </thead>
                             <tbody className="text-gray-300">
@@ -1195,6 +1196,73 @@ export default function App() {
                                       {archive.deduplicated_size ? ((archive.deduplicated_size / 1024 / 1024 / 1024).toFixed(2) + " GB") : "N/A"}
                                     </td>
                                     <td className="px-4 py-3 text-right">{archive.nfiles?.toLocaleString() || "N/A"}</td>
+                                    <td className="px-4 py-3">
+                                      <div className="flex gap-1 justify-center">
+                                        <button
+                                          className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 text-white"
+                                          title="Extract archive"
+                                          onClick={async () => {
+                                            const destination = prompt(`Extract to: (default: /tmp/borg-extract)`, `/tmp/borg-extract`);
+                                            if (destination === null) return;
+                                            
+                                            try {
+                                              const res = await fetch("/api/extract", {
+                                                method: "POST",
+                                                headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({
+                                                  config: selectedConfig || configFiles[0],
+                                                  archive: archive.name,
+                                                  destination: destination || "/tmp/borg-extract"
+                                                })
+                                              });
+                                              
+                                              const data = await res.json();
+                                              if (res.ok) {
+                                                alert(`Extraction started! Job ID: ${data.job_id}\nDestination: ${data.destination}\n\nCheck Jobs page for progress.`);
+                                                setPage("jobs");
+                                              } else {
+                                                alert(`Failed to start extraction: ${data.error}`);
+                                              }
+                                            } catch (e) {
+                                              alert(`Error: ${e.message}`);
+                                            }
+                                          }}
+                                        >
+                                          📦 Extract
+                                        </button>
+                                        <button
+                                          className="px-2 py-1 text-xs rounded bg-purple-600 hover:bg-purple-500 text-white"
+                                          title="Mount archive (read-only)"
+                                          onClick={async () => {
+                                            if (!confirm(`Mount archive "${archive.name}" as read-only filesystem?\n\nNote: Mounting requires FUSE support in the container.`)) {
+                                              return;
+                                            }
+                                            
+                                            try {
+                                              const res = await fetch("/api/mount", {
+                                                method: "POST",
+                                                headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({
+                                                  config: selectedConfig || configFiles[0],
+                                                  archive: archive.name
+                                                })
+                                              });
+                                              
+                                              const data = await res.json();
+                                              if (res.ok) {
+                                                alert(`Archive mounted!\nMount point: ${data.mount_point}\n\nYou can browse files at this location inside the container.`);
+                                              } else {
+                                                alert(`Failed to mount: ${data.error}`);
+                                              }
+                                            } catch (e) {
+                                              alert(`Error: ${e.message}`);
+                                            }
+                                          }}
+                                        >
+                                          📁 Mount
+                                        </button>
+                                      </div>
+                                    </td>
                                   </tr>
                                 ))}
                             </tbody>

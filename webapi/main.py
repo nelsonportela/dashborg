@@ -415,6 +415,180 @@ async def check_repository(request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+# Track mounted archives
+mounted_archives: Dict[str, Dict[str, Any]] = {}
+
+@app.post("/api/mount")
+async def mount_archive(request: Request):
+    """Mount an archive as a filesystem."""
+    try:
+        data = await request.json()
+        config_file = data.get("config", "config.yaml")
+        archive_name = data.get("archive")
+        mount_point = data.get("mount_point", f"/tmp/borg-mount-{archive_name}")
+        
+        if not archive_name:
+            return JSONResponse({"error": "Archive name is required"}, status_code=400)
+        
+        # Check if already mounted
+        if archive_name in mounted_archives:
+            return JSONResponse({
+                "error": "Archive already mounted",
+                "mount_point": mounted_archives[archive_name]["mount_point"]
+            }, status_code=400)
+        
+        # Create mount point if it doesn't exist
+        os.makedirs(mount_point, exist_ok=True)
+        
+        # Generate job ID
+        job_id = str(uuid.uuid4())
+        
+        # Build command
+        cmd = [
+            "borgmatic", "mount",
+            "--config", f"/etc/borgmatic/{config_file}",
+            "--archive", archive_name,
+            "--mount-point", mount_point,
+            "--foreground"  # Keep in foreground for process tracking
+        ]
+        
+        # Initialize job
+        jobs[job_id] = {
+            "id": job_id,
+            "type": "mount",
+            "command": " ".join(cmd),
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "config": config_file,
+            "archive": archive_name,
+            "mount_point": mount_point,
+            "output_lines": [],
+            "progress_info": {}
+        }
+        
+        # Track mounted archive
+        mounted_archives[archive_name] = {
+            "archive": archive_name,
+            "mount_point": mount_point,
+            "job_id": job_id,
+            "mounted_at": datetime.now().isoformat()
+        }
+        
+        # Run in background
+        thread = threading.Thread(target=run_job_in_background, args=(job_id, cmd, "mount"))
+        thread.daemon = True
+        thread.start()
+        
+        return JSONResponse({
+            "job_id": job_id,
+            "mount_point": mount_point,
+            "message": f"Archive mounting at {mount_point}"
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/umount")
+async def umount_archive(request: Request):
+    """Unmount a mounted archive."""
+    try:
+        data = await request.json()
+        archive_name = data.get("archive")
+        
+        if not archive_name or archive_name not in mounted_archives:
+            return JSONResponse({"error": "Archive not mounted"}, status_code=400)
+        
+        mount_info = mounted_archives[archive_name]
+        mount_point = mount_info["mount_point"]
+        
+        # Unmount using fusermount
+        result = subprocess.run(["fusermount", "-u", mount_point], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return JSONResponse({"error": f"Failed to unmount: {result.stderr}"}, status_code=500)
+        
+        # Remove from tracking
+        del mounted_archives[archive_name]
+        
+        # Try to remove mount point directory
+        try:
+            os.rmdir(mount_point)
+        except:
+            pass  # Ignore errors
+        
+        return JSONResponse({"message": f"Archive unmounted from {mount_point}"})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/mounted")
+def list_mounted_archives():
+    """List currently mounted archives."""
+    return JSONResponse({"mounted": list(mounted_archives.values())})
+
+@app.post("/api/extract")
+async def extract_archive(request: Request):
+    """Extract files from an archive."""
+    try:
+        data = await request.json()
+        config_file = data.get("config", "config.yaml")
+        archive_name = data.get("archive")
+        destination = data.get("destination", "/tmp/borg-extract")
+        paths = data.get("paths", [])  # Specific paths to extract, empty = all
+        
+        if not archive_name:
+            return JSONResponse({"error": "Archive name is required"}, status_code=400)
+        
+        # Create destination if it doesn't exist
+        os.makedirs(destination, exist_ok=True)
+        
+        # Generate job ID
+        job_id = str(uuid.uuid4())
+        
+        # Build command
+        cmd = [
+            "borgmatic", "extract",
+            "--config", f"/etc/borgmatic/{config_file}",
+            "--archive", archive_name,
+            "--destination", destination,
+            "--progress"
+        ]
+        
+        # Add specific paths if provided
+        if paths:
+            cmd.append("--path")
+            cmd.extend(paths)
+        
+        # Initialize job
+        jobs[job_id] = {
+            "id": job_id,
+            "type": "extract",
+            "command": " ".join(cmd),
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "config": config_file,
+            "archive": archive_name,
+            "destination": destination,
+            "paths": paths,
+            "output_lines": [],
+            "progress_info": {
+                "current_file": None,
+                "files_processed": 0,
+                "last_update": None
+            }
+        }
+        
+        # Run in background
+        thread = threading.Thread(target=run_job_in_background, args=(job_id, cmd, "extract"))
+        thread.daemon = True
+        thread.start()
+        
+        return JSONResponse({
+            "job_id": job_id,
+            "destination": destination,
+            "message": f"Extraction started to {destination}"
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.get("/api/jobs")
 def list_jobs(db: Session = Depends(get_db), limit: int = 50, offset: int = 0):
     """List all jobs from database and merge with in-memory active jobs."""
